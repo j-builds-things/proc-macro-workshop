@@ -1,6 +1,9 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
-use syn::{parse_macro_input, parse_quote, DeriveInput, Field, ImplItemMethod, Visibility};
+use syn::{
+    parse_macro_input, parse_quote, DeriveInput, Expr, Field, FieldValue, Ident, ImplItemMethod,
+    Visibility,
+};
 
 #[proc_macro_derive(Builder)]
 pub fn derive(input: TokenStream) -> TokenStream {
@@ -31,9 +34,10 @@ pub fn derive(input: TokenStream) -> TokenStream {
         })
         .collect();
 
-    let idents = original_fields
+    let idents: Vec<Ident> = original_fields
         .iter()
-        .map(|field| field.ident.clone().expect("named fields must have idents"));
+        .map(|field| field.ident.clone().expect("named fields must have idents"))
+        .collect();
 
     let method_decls: Vec<ImplItemMethod> = original_fields
         .iter()
@@ -47,6 +51,24 @@ pub fn derive(input: TokenStream) -> TokenStream {
         })
         .collect();
 
+    let assign_to_type: Vec<FieldValue> = idents
+        .iter()
+        .map(|ident| parse_quote!(#ident: #ident))
+        .collect();
+    let constructor: Expr = parse_quote!(Ok(#ident {
+        #(#assign_to_type),*
+    }));
+
+    let assignment: Expr = idents.iter().fold(constructor, |expression, ident| {
+        parse_quote!(
+        if let Some(#ident) = self.#ident.take() {
+            #expression
+        } else {
+            Err("#ident not set".into())
+        }
+        )
+    });
+
     quote! {
        impl #ident {
           fn builder() -> #builder_ident {
@@ -59,6 +81,10 @@ pub fn derive(input: TokenStream) -> TokenStream {
 
        impl #builder_ident {
           #(#method_decls)*
+
+         pub fn build(&mut self) -> ::std::result::Result<#ident, ::std::boxed::Box<dyn ::std::error::Error>> {
+             #assignment
+         }
        }
     }
     .into()
