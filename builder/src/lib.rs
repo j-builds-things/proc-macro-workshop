@@ -53,18 +53,19 @@ pub fn derive(input: TokenStream) -> TokenStream {
 
     let assign_to_type: Vec<FieldValue> = idents
         .iter()
-        .map(|ident| parse_quote!(#ident: #ident))
+        .map(|ident| parse_quote!(#ident: unsafe { self.#ident.take().unwrap_unchecked() }))
         .collect();
     let constructor: Expr = parse_quote!(Ok(#ident {
         #(#assign_to_type),*
     }));
 
     let assignment: Expr = idents.iter().fold(constructor, |expression, ident| {
+        let warning = format!("{} not set", ident);
         parse_quote!(
-        if let Some(#ident) = self.#ident.take() {
+        if self.#ident.is_some() {
             #expression
         } else {
-            Err("#ident not set".into())
+            Err(#warning.into())
         }
         )
     });
